@@ -1764,8 +1764,8 @@ class SelfdriveD:
     from openpilot.starpilot.aol.dm import lateral_event_context
     from openpilot.starpilot.car.toyota.legacy_lateral import below_engage_lateral_allowed as toyota_below_engage_lateral_allowed
     retained_dm_lateral, lateral_events = lateral_event_context(self, CS, intent, native, now_ns, ordinary_lag)
-    reverse_pause = known_reverse_pause(CS, getattr(self, 'car_state_samples', ()))
-    if reverse_pause:
+    gear_pause = self.aol_gear_pause(CS)
+    if gear_pause:
       lateral_events = [event for event in lateral_events if event not in (EventName.wrongGear, EventName.reverseGear)]
     return decide_axes(
       standard_lateral=self.active, standard_longitudinal=bool(self.enabled and self.CP.openpilotLongitudinalControl and
@@ -1806,11 +1806,17 @@ class SelfdriveD:
                         self.sm['driverMonitoringState'].alwaysOnLockout or
                         self.sm['driverMonitoringState'].alertLevel == AlertLevel.three)),
       pause_brake_mps=self.aol_settings.pause_brake_mps if self.aol_settings is not None else 0.0,
-      gear_pause=reverse_pause,
+      gear_pause=gear_pause,
       lateral_inhibit=self.aol_dm_lateral_inhibit or sng_standstill_lateral_inhibit(self.CP, CS) or any(
         sample.steerFaultTemporary or sample.brakePressed and not sample.standstill and
         sample.vEgo < (self.aol_settings.pause_brake_mps if self.aol_settings is not None else 0.0)
         for sample, _ in getattr(self, 'car_state_samples', ())))
+
+  def aol_gear_pause(self, CS):
+    """A known non-driving gear pauses AOL output without revoking armed intent."""
+    from openpilot.starpilot.car.ford.aol import park_pause as ford_park_pause
+    samples = getattr(self, 'car_state_samples', ())
+    return known_reverse_pause(CS, samples) or ford_park_pause(self.CP, CS, samples)
 
   def cold_gm_park_readiness(self, CS, intent, now_ns):
     from openpilot.starpilot.car.gm.aol import cold_park_readiness
@@ -2124,15 +2130,15 @@ class SelfdriveD:
       # Temporary EPS withdraws steering commands without revoking the armed
       # latch. Keep the event and ordinary soft-disable behavior unchanged.
       from openpilot.starpilot.aol.seatbelt import seatbelt_lateral_soft_event_allowed
-      reverse_pause = known_reverse_pause(CS, getattr(self, 'car_state_samples', ()))
+      gear_pause = self.aol_gear_pause(CS)
       aol_hard_soft_fault = any(event.softDisable and not (
         event.name == EventName.doorOpen or event.name in LONGITUDINAL_ONLY_EVENTS or
-        event.name == EventName.wrongGear and reverse_pause or
+        event.name == EventName.wrongGear and gear_pause or
         event.name == EventName.steerTempUnavailable and CS.steerFaultTemporary and not CS.steerFaultPermanent or
         seatbelt_lateral_soft_event_allowed(self.CP, CS, intent, native, event,
           source_ns=self.aol_car_state_log_ns, now_ns=now_ns, axis_session_id=self.aol_session_id,
           pending_lateral_request=not previous.lateral_active and not self.aol_authority_lost,
-          gear_pause=reverse_pause))
+          gear_pause=gear_pause))
         for event in self.events.to_msg())
       cold_main_wait = self.cold_gm_main_readiness(CS, intent, now_ns)
       cold_park_wait = self.cold_gm_park_readiness(CS, intent, now_ns)

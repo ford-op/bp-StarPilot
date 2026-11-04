@@ -1,4 +1,4 @@
-"""A real reverse withdrawal may precede the 10Hz native request echo; it never permits output."""
+"""A real Reverse/Park withdrawal may precede the 10Hz native request echo; it never permits output."""
 from dataclasses import replace
 
 import pytest
@@ -11,11 +11,12 @@ from openpilot.starpilot.aol.wire import encode_safety
 from openpilot.starpilot.car.ford.command_pause import retain_gear_withdrawal_intent
 
 
+@pytest.mark.parametrize('gear', ['reverse', 'park'])
 @pytest.mark.parametrize('gap', [False, True])
-@pytest.mark.parametrize('fault', ['none', 'expired_baseline', 'drive', 'can', 'eps', 'unlatched', 'producer',
+@pytest.mark.parametrize('fault', ['none', 'expired_baseline', 'drive', 'can', 'eps', 'door', 'unlatched', 'producer',
                                   'axis_active', 'axis_source', 'events', 'native_allow', 'native_long', 'native_fault',
                                   'native_expired', 'inventory'])
-def test_ford_reverse_native_withdrawal_preserves_only_bounded_existing_intent(fault, gap):
+def test_ford_reverse_native_withdrawal_preserves_only_bounded_existing_intent(fault, gap, gear):
   cp = structs.CarParams(brand='ford', carFingerprint=CAR.FORD_MUSTANG_MACH_E_MK1,
     flags=int(FordFlags.CANFD), alternativeExperience=32, steerControlType='angle', transmissionType='automatic',
     pcmCruise=True, safetyConfigs=[structs.CarParams.SafetyConfig(safetyModel='ford', safetyParam=0x4002)])
@@ -24,7 +25,7 @@ def test_ford_reverse_native_withdrawal_preserves_only_bounded_existing_intent(f
   feedback = TransportPauseFeedback(cp)
   active, _ = sample(cp, NOW - 10_000_000, active=True)
   assert not feedback.observe(active, cp, cs, NOW - 10_000_000, latched=True, intent_producer_session=PRODUCER)
-  cs.gearShifter = 'reverse'
+  cs.gearShifter = gear
   now = NOW + (190_000_001 if fault == 'expired_baseline' else 10_000_000)
   sm, native = sample(cp, now, 2, gap=gap)
   native = replace(native, requestedLateral=True)
@@ -35,6 +36,8 @@ def test_ford_reverse_native_withdrawal_preserves_only_bounded_existing_intent(f
     cs.canValid = False
   elif fault == 'eps':
     cs.steerFaultTemporary = True
+  elif fault == 'door':
+    cs.doorOpen = True
   elif fault == 'producer':
     producer = 'different'
   elif fault in ('axis_active', 'axis_source'):

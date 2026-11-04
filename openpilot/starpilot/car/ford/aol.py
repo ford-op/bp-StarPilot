@@ -147,6 +147,25 @@ def create_intent(cp, settings):
   return FordCardIntent(cp, settings)
 
 
+def park_pause(cp, car_state, samples=()) -> bool:
+  """Park pauses armed lateral the way the Neutral/Reverse transition does.
+
+  Steering commands are already withdrawn outside Drive (and the Panda denies
+  them), so this keeps only the driver's armed intent. A door opening or the
+  belt unlatching in Park still ends it.
+  """
+  try:
+    gears = structs.CarState.GearShifter
+    states = [car_state, *(state for state, _ in samples)]
+    return bool(qualified(cp, marked_only=True) and all(valid for _, valid in samples) and
+                car_state.gearShifter == gears.park and
+                all(state.canValid and not state.canTimeout and not state.doorOpen and not state.seatbeltUnlatched and
+                    state.gearShifter in (gears.drive, gears.low, gears.sport, gears.brake,
+                                          gears.neutral, gears.reverse, gears.park) for state in states))
+  except (AttributeError, KeyError, IndexError, TypeError, ValueError, OverflowError):
+    return False
+
+
 def temporary_eps_restriction(cp, state):
   """Ford physical EPS pause; OP-long may continue independently. Intent only."""
   try:
